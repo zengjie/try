@@ -207,7 +207,10 @@ func renderTitleBar(width int) string {
 func renderTableHeader(width int) string {
 	// Fixed column widths matching the delegate
 	// Using tab separation for better alignment
-	header := fmt.Sprintf("  %-35s %-30s %-15s", "Name", "Tags", "Modified")
+	header := fmt.Sprintf("  %-*s %-*s %-*s", 
+		NameColumnWidth, "Name", 
+		TagsColumnWidth, "Tags", 
+		ModifiedColumnWidth, "Modified")
 	
 	// Style the header
 	headerStyle := lipgloss.NewStyle().
@@ -219,37 +222,5 @@ func renderTableHeader(width int) string {
 }
 
 func (m Model) renderHelp() string {
-	helpText := `
-🚀 Try - Keyboard Shortcuts
-
-Navigation:
-  ↑/↓         Move up/down
-  ←/→         Page left/right  
-  PgUp/PgDn   Page up/down
-  Home/End    Go to top/bottom
-
-Actions:
-  Enter       Select/Create directory
-  ESC         Clear search/Cancel
-  Tab         Auto-complete search
-  Ctrl+D      Delete directory
-  Ctrl+W      Create worktree (for git repos)
-  Ctrl+G      Clone git repository
-  
-Search:
-  Type        Filter directories
-  Backspace   Delete character
-  Ctrl+U      Clear search
-
-Other:
-  ?           Show this help
-  q, Ctrl+C   Quit
-
-Tips:
-  • Directories are sorted by relevance when searching
-  • New directories get today's date prefix automatically
-  • Git repositories and worktrees have special indicators
-`
-
-	return helpViewStyle.Render(helpText)
+	return m.RenderInteractiveHelp()
 }

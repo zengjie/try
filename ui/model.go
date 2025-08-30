@@ -11,6 +11,13 @@ import (
 	"github.com/zengjie/try/core"
 )
 
+// Column width constants for consistent layout
+const (
+	NameColumnWidth     = 50
+	TagsColumnWidth     = 15
+	ModifiedColumnWidth = 15
+)
+
 // DirectoryItem implements list.Item interface
 type DirectoryItem struct {
 	core.Directory
@@ -64,17 +71,17 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 		prefix = "▶ "
 	}
 	
-	// Format name (35 chars)
+	// Format name
 	name := i.Name
-	if len(name) > 35 {
-		name = name[:32] + "..."
+	if len(name) > NameColumnWidth {
+		name = name[:NameColumnWidth-3] + "..."
 	}
-	// Pad name to exactly 35 characters
-	for len(name) < 35 {
+	// Pad name to exactly NameColumnWidth characters
+	for len(name) < NameColumnWidth {
 		name = name + " "
 	}
 	
-	// Format tags (30 chars to account for emoji width)
+	// Format tags
 	tags := ""
 	if i.IsGitRepo {
 		tags = "git "
@@ -87,18 +94,18 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 	} else {
 		tags = strings.TrimSpace(tags)
 	}
-	// Pad tags to exactly 30 characters (more space for unicode)
-	for len(tags) < 30 {
+	// Pad tags to exactly TagsColumnWidth characters (more space for unicode)
+	for len(tags) < TagsColumnWidth {
 		tags = tags + " "
 	}
 	
-	// Format modified time (15 chars)
+	// Format modified time
 	age := core.GetRelativeAge(i.ModifiedTime)
-	if len(age) > 15 {
-		age = age[:12] + "..."
+	if len(age) > ModifiedColumnWidth {
+		age = age[:ModifiedColumnWidth-3] + "..."
 	}
-	// Pad age to exactly 15 characters
-	for len(age) < 15 {
+	// Pad age to exactly ModifiedColumnWidth characters
+	for len(age) < ModifiedColumnWidth {
 		age = age + " "
 	}
 	

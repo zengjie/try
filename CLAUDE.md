@@ -8,16 +8,29 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Implementation Status
 
-Currently in planning phase with PRD complete. Implementation will be in Go for single binary distribution.
+Implementation is complete with full working functionality. The project is built in Go for single binary distribution.
 
 ## Architecture
 
 The project follows a modular Go architecture:
 - `main.go` - Entry point and command parsing
 - `ui/` - Terminal UI using Bubble Tea framework (model/view/update pattern)
+  - `model.go` - UI state and data model
+  - `view.go` - UI rendering logic
+  - `update.go` - Event handling and state updates
+  - `help.go` - Help screen implementation
 - `core/` - Directory scanning, scoring algorithm, and management operations
-- `shell/` - Shell-specific integrations (bash, zsh, fish)
-- `cmd/` - Command implementations (cd, clone, worktree)
+  - `manager.go` - Main directory management operations
+  - `scanner.go` - Directory discovery and parsing
+  - `scoring.go` - Fuzzy search scoring algorithm
+  - `scoring_test.go` - Test suite for scoring algorithm
+- `shell/` - Shell-specific integrations
+  - `shell.go` - Shell detection and integration utilities
+- `cmd/` - Command implementations
+  - `selector.go` - Interactive directory selection UI
+  - `git.go` - Git repository operations (clone, worktree)
+- `Makefile` - Build automation and development commands
+- `install.sh` - Installation script
 
 ## Key Implementation Notes
 
@@ -31,7 +44,7 @@ The project follows a modular Go architecture:
 - Default storage: `~/src/tries` (configurable via `TRY_PATH`)
 - Fuzzy search with smart scoring (text matching + time-based decay)
 
-### Commands to Implement
+### Available Commands
 ```bash
 try                     # Interactive directory selector
 try [query]            # Search and select/create with query
@@ -43,17 +56,32 @@ try worktree <path>    # Create worktree from path
 
 ## Development Commands
 
+The project includes a Makefile with standard development commands:
+
 ### Build
 ```bash
-go build -o try main.go
+make build              # Build the binary
+make                    # Default build target
 ```
 
 ### Test
 ```bash
-go test ./...
+make test               # Run all tests
+go test ./...           # Alternative test command
+```
+
+### Install
+```bash
+make install            # Install to GOBIN or ~/bin
+./install.sh            # Run installation script
 ```
 
 ### Cross-compilation
+```bash
+make dist               # Build for all platforms
+```
+
+Individual platform builds:
 ```bash
 GOOS=linux GOARCH=amd64 go build -o dist/try-linux-amd64
 GOOS=darwin GOARCH=amd64 go build -o dist/try-darwin-amd64

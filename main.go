@@ -8,6 +8,7 @@ import (
 
 	"github.com/zengjie/try/cmd"
 	"github.com/zengjie/try/shell"
+	"github.com/zengjie/try/ui"
 )
 
 func main() {
@@ -120,19 +121,7 @@ USAGE:
 SHORTCUTS:
     try <git-url>           Automatically clone if URL detected
 
-KEYBOARD SHORTCUTS (Interactive Mode):
-    ↑/↓                   Navigate up/down
-    ←/→                   Page left/right
-    Enter                 Select directory or create new
-    Tab                   Auto-complete search
-    Backspace             Delete character from search
-    Ctrl-U                Clear search
-    Ctrl-D                Delete directory (with confirmation)
-    Ctrl-W                Create worktree (git repos)
-    Ctrl-G                Clone repository
-    ?                     Show help
-    ESC                   Clear search/Cancel
-    q, Ctrl-C             Quit
+` + ui.RenderCLIKeyboardShortcuts() + `
 
 ENVIRONMENT:
     TRY_PATH               Override default directory location
