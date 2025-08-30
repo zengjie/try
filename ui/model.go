@@ -198,14 +198,13 @@ func (m *Model) LoadDirectories() error {
 }
 
 func (m *Model) updateFiltered() {
-	// Update filtered directories
+	// Filter and score directories using the new scoring system
+	m.filteredDirs = core.FilterAndScoreDirectories(m.directories, m.query)
+	
+	// Sort by score when there's a query, by time otherwise
 	if m.query == "" {
-		m.filteredDirs = m.directories
-		core.ScoreDirectories(m.filteredDirs, "")
 		core.SortDirectoriesByTime(m.filteredDirs)
 	} else {
-		m.filteredDirs = core.FilterDirectories(m.directories, m.query)
-		core.ScoreDirectories(m.filteredDirs, m.query)
 		core.SortDirectoriesByScore(m.filteredDirs)
 	}
 	

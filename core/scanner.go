@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 )
 
@@ -16,6 +15,8 @@ type Directory struct {
 	ModifiedTime time.Time
 	AccessTime   time.Time
 	Score        float64
+	TextScore    float64
+	TimeScore    float64
 	IsGitRepo    bool
 	IsWorktree   bool
 }
@@ -71,21 +72,23 @@ func ScanDirectories() ([]Directory, error) {
 	return directories, nil
 }
 
-func FilterDirectories(directories []Directory, query string) []Directory {
-	if query == "" {
-		return directories
-	}
-	
-	query = strings.ToLower(query)
-	var filtered []Directory
+func FilterAndScoreDirectories(directories []Directory, query string) []Directory {
+	scorer := NewScorer()
+	var scored []Directory
 	
 	for _, dir := range directories {
-		if strings.Contains(strings.ToLower(dir.Name), query) {
-			filtered = append(filtered, dir)
+		scoreResult := scorer.ScoreDirectory(dir.Name, query, dir.ModifiedTime)
+		
+		// Only include directories with non-zero scores when there's a query
+		if query == "" || scoreResult.Score > 0 {
+			dir.Score = scoreResult.Score
+			dir.TextScore = scoreResult.TextScore
+			dir.TimeScore = scoreResult.TimeScore
+			scored = append(scored, dir)
 		}
 	}
 	
-	return filtered
+	return scored
 }
 
 func SortDirectoriesByScore(directories []Directory) {
