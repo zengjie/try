@@ -201,6 +201,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.SetQuery("")
 			return m, nil
 
+		case "ctrl+j":
+			// Move down (hidden navigation feature)
+			m.list.CursorDown()
+			return m, nil
+
+		case "ctrl+k":
+			// Move up (hidden navigation feature)
+			m.list.CursorUp()
+			return m, nil
+
+		case "ctrl+p":
+			// Page up (hidden navigation feature)
+			m.list.Paginator.PrevPage()
+			return m, nil
+
+		case "ctrl+n":
+			// Page down (hidden navigation feature)
+			m.list.Paginator.NextPage()
+			return m, nil
+
 		case "backspace":
 			m.DeleteFromQuery()
 			return m, nil
