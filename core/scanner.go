@@ -79,8 +79,9 @@ func FilterAndScoreDirectories(directories []Directory, query string) []Director
 	for _, dir := range directories {
 		scoreResult := scorer.ScoreDirectory(dir.Name, query, dir.ModifiedTime)
 		
-		// Only include directories with non-zero scores when there's a query
-		if query == "" || scoreResult.Score > 0 {
+		// Only include directories with text matches when there's a query
+		// This excludes files that only match on time but not on content
+		if query == "" || scoreResult.TextScore > 0 {
 			dir.Score = scoreResult.Score
 			dir.TextScore = scoreResult.TextScore
 			dir.TimeScore = scoreResult.TimeScore
