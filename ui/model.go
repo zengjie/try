@@ -155,11 +155,9 @@ func NewModel() Model {
 	l := list.New(items, del, 0, 0)
 	l.SetShowTitle(false) // Disable title completely
 	l.SetShowStatusBar(false)
-	l.SetFilteringEnabled(true)
+	l.SetFilteringEnabled(false) // Disable built-in filtering - we use our own scoring system
 	l.SetShowHelp(false)
 	l.Styles.Title = lipgloss.NewStyle() // Empty style
-	l.Styles.FilterPrompt = lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B"))
-	l.Styles.FilterCursor = lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B"))
 	
 	// Remove pagination dots
 	l.SetShowPagination(false)
@@ -220,11 +218,6 @@ func (m *Model) updateFiltered() {
 func (m *Model) SetQuery(q string) {
 	m.query = q
 	m.updateFiltered()
-	
-	// Update the list's filter state
-	if q != "" {
-		m.list.FilterInput.SetValue(q)
-	}
 }
 
 func (m *Model) AppendToQuery(ch rune) {

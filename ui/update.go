@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/zengjie/try/core"
 )
@@ -136,17 +135,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Check if we're in filter mode
-		if m.list.FilterState() == list.Filtering {
-			// Let the list handle filtering
-			m.list, cmd = m.list.Update(msg)
-			
-			// Update our query to match the filter
-			m.query = m.list.FilterValue()
-			m.updateFiltered()
-			
-			return m, cmd
-		}
 
 		// Normal mode key handling
 		switch msg.String() {
@@ -158,11 +146,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "/":
-			// Start filtering with the list component
-			// The list component doesn't have StartFiltering, we handle it differently
-			// Just pass the key to the list
-			m.list, cmd = m.list.Update(msg)
-			return m, cmd
+			// Start search mode by appending to query
+			m.AppendToQuery('/')
+			return m, nil
 
 		case "enter":
 			if m.IsCreating() {
@@ -231,7 +217,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		default:
 			// Handle character input for search
-			if m.list.FilterState() != list.Filtering && len(msg.String()) == 1 {
+			if len(msg.String()) == 1 {
 				r := []rune(msg.String())[0]
 				if r >= 32 && r < 127 {
 					m.AppendToQuery(r)

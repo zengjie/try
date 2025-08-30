@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/zengjie/try/core"
 )
@@ -84,12 +83,10 @@ func (m Model) View() string {
 	output.WriteString(title)
 	output.WriteString("\n")
 
-	// Search box when not using list's filter
-	if m.list.FilterState() != list.Filtering {
-		searchBox := renderSearchBox(m.query, m.IsCreating(), m.width)
-		output.WriteString(searchBox)
-		output.WriteString("\n")
-	}
+	// Search box (always show our custom search)
+	searchBox := renderSearchBox(m.query, m.IsCreating(), m.width)
+	output.WriteString(searchBox)
+	output.WriteString("\n")
 
 	// Worktree input (if active)
 	if m.creatingWorktree {
@@ -116,7 +113,7 @@ func (m Model) View() string {
 	}
 
 	// Main list view
-	if len(m.filteredDirs) == 0 && m.list.FilterState() != list.Filtering {
+	if len(m.filteredDirs) == 0 {
 		emptyMsg := renderEmptyState(m.query)
 		output.WriteString(emptyMsg)
 		output.WriteString("\n")
@@ -148,7 +145,7 @@ func (m Model) View() string {
 func renderSearchBox(query string, isCreating bool, width int) string {
 	content := fmt.Sprintf("🔍 %s", query)
 	if query == "" {
-		content = "🔍 Type to search or / to filter..."
+		content = "🔍 Type to search with fuzzy matching..."
 	}
 	if isCreating {
 		content += dimStyle.Render(" (new)")
@@ -186,8 +183,7 @@ func renderStatusBar(current, total int, query string) string {
 
 func renderHelpBar() string {
 	shortcuts := []string{
-		"↑↓ Navigate",
-		"/ Filter",
+		"↑↓←→ Navigate",
 		"⏎ Select",
 		"^W Worktree",
 		"^G Clone",
@@ -227,15 +223,14 @@ func (m Model) renderHelp() string {
 🚀 Try - Keyboard Shortcuts
 
 Navigation:
-  ↑/↓, j/k    Move up/down
+  ↑/↓         Move up/down
+  ←/→         Page left/right  
   PgUp/PgDn   Page up/down
   Home/End    Go to top/bottom
-  g/G         Go to top/bottom
 
 Actions:
   Enter       Select/Create directory
-  /           Start filtering
-  ESC         Clear filter/Cancel
+  ESC         Clear search/Cancel
   Tab         Auto-complete search
   Ctrl+D      Delete directory
   Ctrl+W      Create worktree (for git repos)

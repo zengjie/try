@@ -121,12 +121,18 @@ SHORTCUTS:
     try <git-url>           Automatically clone if URL detected
 
 KEYBOARD SHORTCUTS (Interactive Mode):
-    ↑/↓, Ctrl-P/N          Navigate up/down
-    Ctrl-J/K               Vim-style navigation
-    Enter                  Select directory or create new
-    Backspace              Delete character
-    Ctrl-D                 Delete directory (with confirmation)
-    ESC                    Cancel operation
+    ↑/↓                   Navigate up/down
+    ←/→                   Page left/right
+    Enter                 Select directory or create new
+    Tab                   Auto-complete search
+    Backspace             Delete character from search
+    Ctrl-U                Clear search
+    Ctrl-D                Delete directory (with confirmation)
+    Ctrl-W                Create worktree (git repos)
+    Ctrl-G                Clone repository
+    ?                     Show help
+    ESC                   Clear search/Cancel
+    q, Ctrl-C             Quit
 
 ENVIRONMENT:
     TRY_PATH               Override default directory location
