@@ -2,6 +2,8 @@
 
 A lightweight command-line tool for managing experimental projects and quick coding sessions. Try provides an organized, searchable workspace for all your temporary projects, experiments, and learning exercises.
 
+> **Credits:** This Go implementation is inspired by and based on the original [Try](https://github.com/tobi/try) tool written in Ruby by Tobias Lütke. The original Ruby version pioneered the concept of dated experimental directories with fuzzy search.
+
 ## Features
 
 - **Instant fuzzy search** across all experiments
