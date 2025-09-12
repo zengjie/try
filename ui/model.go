@@ -21,6 +21,8 @@ const (
 // DirectoryItem implements list.Item interface
 type DirectoryItem struct {
 	core.Directory
+	IsCreateNew bool // Special flag to indicate this is a "create new" option
+	CreateQuery string // Query to create if this is a create new item
 }
 
 func (i DirectoryItem) FilterValue() string {
@@ -71,6 +73,47 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 		prefix = "▶ "
 	}
 	
+	// Special rendering for "create new" items
+	if i.IsCreateNew {
+		// Format name with special styling
+		name := i.Name
+		if len(name) > NameColumnWidth {
+			name = name[:NameColumnWidth-3] + "..."
+		}
+		// Pad name to exactly NameColumnWidth characters
+		for len(name) < NameColumnWidth {
+			name = name + " "
+		}
+		
+		// Empty tags and age for create new items
+		tags := strings.Repeat(" ", TagsColumnWidth)
+		age := strings.Repeat(" ", ModifiedColumnWidth)
+		
+		// Build the complete row
+		row := fmt.Sprintf("%s%s %s %s", prefix, name, tags, age)
+		
+		// Apply style with special color for create new
+		createItemStyle := lipgloss.NewStyle().
+			PaddingLeft(0).
+			Foreground(lipgloss.Color("#A9B665")).
+			Italic(true)
+		
+		selectedCreateItemStyle := lipgloss.NewStyle().
+			PaddingLeft(0).
+			Foreground(lipgloss.Color("#A9B665")).
+			Background(lipgloss.Color("#45475A")).
+			Italic(true).
+			Bold(true)
+		
+		if index == m.Index() {
+			fmt.Fprint(w, selectedCreateItemStyle.Render(row))
+		} else {
+			fmt.Fprint(w, createItemStyle.Render(row))
+		}
+		return
+	}
+	
+	// Normal directory rendering
 	// Format name
 	name := i.Name
 	if len(name) > NameColumnWidth {
@@ -150,6 +193,9 @@ type Model struct {
 	creatingWorktree  bool
 	worktreeInput     string
 	worktreeRepo      string
+	initializingGit   bool
+	gitInitConfirm    bool
+	explicitCreating  bool
 	err               error
 }
 
@@ -187,6 +233,9 @@ func NewModel() Model {
 		creatingWorktree:  false,
 		worktreeInput:     "",
 		worktreeRepo:      "",
+		initializingGit:   false,
+		gitInitConfirm:    false,
+		explicitCreating:  false,
 		err:               nil,
 	}
 }
@@ -216,7 +265,20 @@ func (m *Model) updateFiltered() {
 	// Convert to list items
 	items := make([]list.Item, len(m.filteredDirs))
 	for i, dir := range m.filteredDirs {
-		items[i] = DirectoryItem{dir}
+		items[i] = DirectoryItem{Directory: dir, IsCreateNew: false}
+	}
+	
+	// Add "Create new directory" option if query doesn't exactly match any directory
+	if m.query != "" && !m.HasExactMatch() {
+		createItem := DirectoryItem{
+			Directory: core.Directory{
+				Name: fmt.Sprintf("✨ Create new: %s", core.GenerateDatedName(m.query)),
+				Path: "", // Empty path indicates this is a create option
+			},
+			IsCreateNew: true,
+			CreateQuery: m.query,
+		}
+		items = append(items, createItem)
 	}
 	
 	m.list.SetItems(items)
@@ -224,30 +286,29 @@ func (m *Model) updateFiltered() {
 
 func (m *Model) SetQuery(q string) {
 	m.query = q
+	m.explicitCreating = false  // Reset explicit creation when changing query
 	m.updateFiltered()
 }
 
 func (m *Model) AppendToQuery(ch rune) {
 	m.query += string(ch)
+	m.explicitCreating = false  // Reset explicit creation when typing
 	m.updateFiltered()
 }
 
 func (m *Model) DeleteFromQuery() {
 	if len(m.query) > 0 {
 		m.query = m.query[:len(m.query)-1]
+		m.explicitCreating = false  // Reset explicit creation when deleting
 		m.updateFiltered()
 	}
 }
 
-func (m *Model) GetSelected() *core.Directory {
+func (m *Model) GetSelected() *DirectoryItem {
 	selected := m.list.SelectedItem()
 	if selected != nil {
 		if item, ok := selected.(DirectoryItem); ok {
-			for i := range m.filteredDirs {
-				if m.filteredDirs[i].Path == item.Path {
-					return &m.filteredDirs[i]
-				}
-			}
+			return &item
 		}
 	}
 	return nil
@@ -272,15 +333,37 @@ func (m *Model) SetSize(width, height int) {
 	m.list.SetHeight(availableHeight)
 }
 
+func (m *Model) HasExactMatch() bool {
+	if m.query == "" {
+		return false
+	}
+	
+	queryLower := strings.ToLower(m.query)
+	for _, dir := range m.filteredDirs {
+		dirNameLower := strings.ToLower(core.ExtractNameFromDirectory(dir.Name))
+		if dirNameLower == queryLower {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *Model) IsCreating() bool {
-	return len(m.filteredDirs) == 0 && m.query != ""
+	// This method is now less relevant since creation is handled via list selection
+	// Keep it for backward compatibility with explicit creation (Ctrl+N)
+	return m.explicitCreating
 }
 
 func (m *Model) StartDelete() {
-	selected := m.list.Index()
-	if selected >= 0 && selected < len(m.filteredDirs) {
-		m.deleting = true
-		m.selectedForDelete = selected
+	if selectedItem := m.GetSelected(); selectedItem != nil && !selectedItem.IsCreateNew {
+		// Find the index in filteredDirs
+		for i, dir := range m.filteredDirs {
+			if dir.Path == selectedItem.Path {
+				m.deleting = true
+				m.selectedForDelete = i
+				break
+			}
+		}
 	}
 }
 
@@ -311,4 +394,29 @@ func (m *Model) ConfirmDelete() error {
 		m.CancelDelete()
 	}
 	return nil
+}
+
+func (m *Model) StartGitInit() {
+	if selectedItem := m.GetSelected(); selectedItem != nil && !selectedItem.IsCreateNew {
+		// Only allow Git init on regular directories (not already Git repos or worktrees)
+		if !selectedItem.IsGitRepo && !selectedItem.IsWorktree {
+			m.initializingGit = true
+			m.gitInitConfirm = true
+		}
+	}
+}
+
+func (m *Model) CancelGitInit() {
+	m.initializingGit = false
+	m.gitInitConfirm = false
+}
+
+func (m *Model) StartExplicitCreate() {
+	if m.query != "" {
+		m.explicitCreating = true
+	}
+}
+
+func (m *Model) CancelExplicitCreate() {
+	m.explicitCreating = false
 }

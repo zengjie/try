@@ -135,6 +135,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		if m.initializingGit && m.gitInitConfirm {
+			switch msg.String() {
+			case "y", "Y", "enter":
+				if selected := m.GetSelected(); selected != nil && !selected.IsCreateNew {
+					if err := initializeGitRepository(selected.Path); err != nil {
+						m.err = err
+					} else {
+						m.LoadDirectories()
+					}
+				}
+				m.CancelGitInit()
+				return m, nil
+			case "n", "N", "esc":
+				m.CancelGitInit()
+				return m, nil
+			}
+			return m, nil
+		}
 
 		// Normal mode key handling
 		switch msg.String() {
@@ -151,21 +169,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "enter":
-			if m.IsCreating() {
-				// Create new directory
-				path, err := core.CreateDirectory(m.query)
-				if err != nil {
-					m.err = err
-					return m, nil
-				}
-				writeCdPath(path)
-				return m, tea.Quit
-			}
-			
-			// Select existing directory
+			// Check what's selected
 			if selected := m.GetSelected(); selected != nil {
-				writeCdPath(selected.Path)
-				return m, tea.Quit
+				if selected.IsCreateNew {
+					// Create new directory
+					path, err := core.CreateDirectory(selected.CreateQuery)
+					if err != nil {
+						m.err = err
+						return m, nil
+					}
+					writeCdPath(path)
+					return m, tea.Quit
+				} else {
+					// Select existing directory
+					writeCdPath(selected.Path)
+					return m, tea.Quit
+				}
 			}
 			return m, nil
 
@@ -184,7 +203,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "ctrl+w":
-			if selected := m.GetSelected(); selected != nil {
+			if selected := m.GetSelected(); selected != nil && !selected.IsCreateNew {
 				if isGitRepository(selected.Path) {
 					m.creatingWorktree = true
 					m.worktreeRepo = selected.Path
@@ -195,6 +214,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "ctrl+g":
 			m.cloning = true
+			return m, nil
+
+		case "ctrl+r":
+			m.StartGitInit()
 			return m, nil
 
 		case "ctrl+u":
@@ -217,6 +240,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "ctrl+n":
+			m.StartExplicitCreate()
+			return m, nil
+
+		case "ctrl+f":
 			// Page down (hidden navigation feature)
 			m.list.Paginator.NextPage()
 			return m, nil
@@ -226,7 +253,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "esc":
-			if m.query != "" {
+			if m.explicitCreating {
+				m.CancelExplicitCreate()
+			} else if m.query != "" {
 				m.SetQuery("")
 			} else if m.deleting {
 				m.CancelDelete()
@@ -347,6 +376,19 @@ func createWorktreeFromPath(repoPath, name string) error {
 	
 	// Write path for cd
 	writeCdPath(worktreePath)
+	
+	return nil
+}
+
+func initializeGitRepository(path string) error {
+	// Initialize Git repository in the specified directory
+	cmd := exec.Command("git", "init")
+	cmd.Dir = path
+	
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to initialize Git repository: %w\nOutput: %s", err, string(output))
+	}
 	
 	return nil
 }

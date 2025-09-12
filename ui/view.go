@@ -84,7 +84,7 @@ func (m Model) View() string {
 	output.WriteString("\n")
 
 	// Search box (always show our custom search)
-	searchBox := renderSearchBox(m.query, m.IsCreating(), m.width)
+	searchBox := renderSearchBox(m.query, m.IsCreating(), m.explicitCreating, m.width)
 	output.WriteString(searchBox)
 	output.WriteString("\n")
 
@@ -109,6 +109,23 @@ func (m Model) View() string {
 			dimStyle.Render("Type 'yes' or directory name to confirm: ") + highlightStyle.Render(m.deleteInput) + "\n" +
 			helpStyle.Render("Press ESC to cancel")
 		output.WriteString(deleteSection)
+		output.WriteString("\n")
+	}
+
+	// Git init confirmation (if active)
+	if m.initializingGit && m.gitInitConfirm {
+		if selected := m.GetSelected(); selected != nil && !selected.IsCreateNew {
+			gitInitSection := highlightStyle.Render(fmt.Sprintf("🔧 Initialize Git repository in '%s'?", selected.Name)) + "\n" +
+				dimStyle.Render("Press Y to confirm or N/ESC to cancel")
+			output.WriteString(gitInitSection)
+			output.WriteString("\n")
+		}
+	}
+
+	// Creation preview (if in explicit creation mode)
+	if m.explicitCreating && m.query != "" {
+		creationPreview := renderCreationPreview(m.query)
+		output.WriteString(creationPreview)
 		output.WriteString("\n")
 	}
 
@@ -142,7 +159,15 @@ func (m Model) View() string {
 	return output.String()
 }
 
-func renderSearchBox(query string, isCreating bool, width int) string {
+func renderSearchBox(query string, isCreating bool, explicitCreating bool, width int) string {
+	if explicitCreating && query != "" {
+		// Explicit creation mode - show different style
+		content := fmt.Sprintf("✨ Creating: %s", query)
+		box := searchBoxStyle.Width(width - 2).Render(content)
+		return box
+	}
+	
+	// Normal search mode
 	content := fmt.Sprintf("🔍 %s", query)
 	if query == "" {
 		content = "🔍 Type to search with fuzzy matching..."
@@ -167,6 +192,21 @@ func renderEmptyState(query string) string {
 		return dimStyle.Render("  No directories yet. Start typing to create one!")
 	}
 	return dimStyle.Render(fmt.Sprintf("  ✨ Press Enter to create '%s'", core.GenerateDatedName(query)))
+}
+
+func renderCreationPreview(query string) string {
+	if query == "" {
+		return ""
+	}
+	
+	actualName := core.GenerateDatedName(query)
+	
+	title := highlightStyle.Render("📁 Create New Directory:")
+	input := fmt.Sprintf("Name: %s", highlightStyle.Render(query))
+	preview := fmt.Sprintf("Will create: %s", highlightStyle.Render(actualName))
+	help := dimStyle.Render("Press Enter to create, ESC to cancel")
+	
+	return fmt.Sprintf("%s\n%s\n%s\n%s", title, input, preview, help)
 }
 
 func renderStatusBar(current, total int, query string) string {

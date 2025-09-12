@@ -32,9 +32,11 @@ func GetHelpContent() HelpContent {
 			{"Enter", "Select/Create directory"},
 			{"ESC", "Clear search/Cancel"},
 			{"Tab", "Auto-complete search"},
+			{"Ctrl+N", "Create new directory"},
 			{"Ctrl+D", "Delete directory"},
 			{"Ctrl+W", "Create worktree (git repos)"},
 			{"Ctrl+G", "Clone git repository"},
+			{"Ctrl+R", "Initialize git repository"},
 		},
 		Search: []HelpItem{
 			{"Type", "Filter directories"},
