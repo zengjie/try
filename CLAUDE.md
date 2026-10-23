@@ -52,6 +52,9 @@ try new [name]         # Create new dated directory
 try . [name]           # Create worktree for current repo
 try clone <git-url>    # Clone repository
 try worktree <path>    # Create worktree from path
+try init [path]        # Generate shell integration script
+try config             # Show ranking configuration
+try config init        # Create the config file for editing
 ```
 
 ## Development Commands

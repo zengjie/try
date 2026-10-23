@@ -255,12 +255,8 @@ func (m *Model) updateFiltered() {
 	// Filter and score directories using the new scoring system
 	m.filteredDirs = core.FilterAndScoreDirectories(m.directories, m.query)
 	
-	// Sort by score when there's a query, by time otherwise
-	if m.query == "" {
-		core.SortDirectoriesByTime(m.filteredDirs)
-	} else {
-		core.SortDirectoriesByScore(m.filteredDirs)
-	}
+	// Rank by usage for empty queries and blend text relevance when searching.
+	core.SortDirectoriesByScore(m.filteredDirs)
 	
 	// Convert to list items
 	items := make([]list.Item, len(m.filteredDirs))

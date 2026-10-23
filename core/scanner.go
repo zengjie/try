@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -14,6 +15,8 @@ type Directory struct {
 	CreatedTime  time.Time
 	ModifiedTime time.Time
 	AccessTime   time.Time
+	AccessCount  int       // times opened through try (from frecency history)
+	LastAccess   time.Time // last time opened through try (zero if never)
 	Score        float64
 	TextScore    float64
 	TimeScore    float64
@@ -32,26 +35,33 @@ func ScanDirectories() ([]Directory, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
+	history := LoadHistory()
 	var directories []Directory
-	
+
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
-		
+
 		fullPath := filepath.Join(tryPath, entry.Name())
 		info, err := entry.Info()
 		if err != nil {
 			continue
 		}
-		
+
 		dir := Directory{
 			Name:         entry.Name(),
 			Path:         fullPath,
 			CreatedTime:  info.ModTime(),
 			ModifiedTime: info.ModTime(),
 			AccessTime:   info.ModTime(),
+		}
+
+		// Merge in frecency history (times this directory was opened via try).
+		if rec, ok := history[fullPath]; ok {
+			dir.AccessCount = rec.Count
+			dir.LastAccess = rec.LastAccess
 		}
 		
 		// Check if it's a git repository or worktree
@@ -72,23 +82,34 @@ func ScanDirectories() ([]Directory, error) {
 	return directories, nil
 }
 
+// FilterAndScoreDirectories scores each directory by blending a text-match
+// signal with a usage (frecency) signal. The blend weight adapts to query
+// length: an empty/short query leans on usage (what you actually open), while a
+// longer, more specific query trusts the text match. When a query is present,
+// directories with no text match are excluded.
 func FilterAndScoreDirectories(directories []Directory, query string) []Directory {
-	scorer := NewScorer()
+	scorer := NewScorerFromConfig(LoadConfig())
+	qlen := len([]rune(strings.TrimSpace(query)))
+	wText := scorer.textWeight(qlen)
+
 	var scored []Directory
-	
 	for _, dir := range directories {
-		scoreResult := scorer.ScoreDirectory(dir.Name, query, dir.ModifiedTime)
-		
-		// Only include directories with text matches when there's a query
-		// This excludes files that only match on time but not on content
-		if query == "" || scoreResult.TextScore > 0 {
-			dir.Score = scoreResult.Score
-			dir.TextScore = scoreResult.TextScore
-			dir.TimeScore = scoreResult.TimeScore
-			scored = append(scored, dir)
+		name := ExtractNameFromDirectory(dir.Name)
+		textScore := scorer.calculateTextScore(name, query)
+
+		// Exclude non-matches when searching (an empty query matches everything).
+		if query != "" && textScore <= 0 {
+			continue
 		}
+
+		usageScore := scorer.calculateUsageScore(dir.ModifiedTime, dir.AccessCount, dir.LastAccess)
+
+		dir.TextScore = textScore
+		dir.TimeScore = usageScore
+		dir.Score = wText*textScore + (1-wText)*usageScore
+		scored = append(scored, dir)
 	}
-	
+
 	return scored
 }
 
@@ -97,13 +118,7 @@ func SortDirectoriesByScore(directories []Directory) {
 		if directories[i].Score != directories[j].Score {
 			return directories[i].Score > directories[j].Score
 		}
-		
-		return directories[i].ModifiedTime.After(directories[j].ModifiedTime)
-	})
-}
 
-func SortDirectoriesByTime(directories []Directory) {
-	sort.Slice(directories, func(i, j int) bool {
 		return directories[i].ModifiedTime.After(directories[j].ModifiedTime)
 	})
 }

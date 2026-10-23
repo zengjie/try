@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/zengjie/try/core"
@@ -47,11 +46,9 @@ func CreateNewDirectory(name string) error {
 		return err
 	}
 	
-	// Write to .try_cd file for shell integration
-	home, _ := os.UserHomeDir()
-	cdFile := filepath.Join(home, ".try_cd")
-	os.WriteFile(cdFile, []byte(path), 0644)
-	
+	// Write to .try_cd for shell integration and record the access (frecency).
+	core.WriteCdPath(path)
+
 	// Also print to stdout for backward compatibility
 	fmt.Println(path)
 	return nil

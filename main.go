@@ -44,6 +44,16 @@ func main() {
 		script := shell.GenerateShellScript(shellName, tryPath)
 		fmt.Print(script)
 
+	case "config":
+		sub := ""
+		if len(os.Args) > 2 {
+			sub = os.Args[2]
+		}
+		if err := cmd.RunConfig(sub); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+
 	case "new":
 		name := ""
 		if len(os.Args) > 2 {
@@ -116,6 +126,8 @@ USAGE:
     try clone <url>         Clone git repository with dated name
     try worktree <path>     Create worktree from repository
     try init [path]         Generate shell integration script
+    try config              Show ranking configuration
+    try config init         Create the config file for editing
     try --help              Show this help message
 
 SHORTCUTS:
@@ -126,6 +138,8 @@ SHORTCUTS:
 ENVIRONMENT:
     TRY_PATH               Override default directory location
                           (default: ~/src/tries)
+    TRY_DATA_DIR           Override where try keeps history and config
+                          (default: ~/.config/try)
 
 EXAMPLES:
     try                    # Open interactive selector

@@ -316,9 +316,8 @@ func loadDirectories() tea.Cmd {
 }
 
 func writeCdPath(path string) {
-	home, _ := os.UserHomeDir()
-	cdFile := filepath.Join(home, ".try_cd")
-	os.WriteFile(cdFile, []byte(path), 0644)
+	// Record directory selections and creations for usage-based ranking.
+	core.WriteCdPath(path)
 }
 
 func isGitRepository(path string) bool {

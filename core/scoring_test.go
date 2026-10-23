@@ -6,73 +6,6 @@ import (
 	"time"
 )
 
-func TestScoreDirectory(t *testing.T) {
-	scorer := NewScorer()
-	now := time.Now()
-	
-	tests := []struct {
-		name      string
-		dirName   string
-		query     string
-		modTime   time.Time
-		wantScore float64 // Approximate expected score
-	}{
-		{
-			name:      "exact match",
-			dirName:   "2025-08-30-project",
-			query:     "project",
-			modTime:   now,
-			wantScore: 1.0,
-		},
-		{
-			name:      "prefix match",
-			dirName:   "2025-08-30-project-manager",
-			query:     "project",
-			modTime:   now,
-			wantScore: 0.8,
-		},
-		{
-			name:      "contains match",
-			dirName:   "2025-08-30-my-project",
-			query:     "project",
-			modTime:   now,
-			wantScore: 0.5,
-		},
-		{
-			name:      "subsequence match",
-			dirName:   "2025-08-30-production",
-			query:     "prd",
-			modTime:   now,
-			wantScore: 0.3,
-		},
-		{
-			name:      "no match",
-			dirName:   "2025-08-30-something",
-			query:     "xyz",
-			modTime:   now,
-			wantScore: 0.0,
-		},
-	}
-	
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			score := scorer.ScoreDirectory(tt.dirName, tt.query, tt.modTime)
-			
-			// Check text score component
-			if tt.wantScore > 0 && score.TextScore == 0 {
-				t.Errorf("Expected non-zero text score for %s matching %s", tt.dirName, tt.query)
-			}
-			
-			// Allow some tolerance in final score
-			tolerance := 0.3
-			if math.Abs(score.Score-tt.wantScore*0.7-0.3) > tolerance {
-				t.Errorf("Score for %s with query %s = %.2f, want ~%.2f", 
-					tt.dirName, tt.query, score.Score, tt.wantScore*0.7+0.3)
-			}
-		})
-	}
-}
-
 func TestCalculateTextScore(t *testing.T) {
 	scorer := NewScorer()
 	
@@ -84,25 +17,64 @@ func TestCalculateTextScore(t *testing.T) {
 	}{
 		{"exact match", "project", "project", 1.0},
 		{"case insensitive", "Project", "project", 1.0},
-		{"prefix match", "project-manager", "project", 0.8},
-		{"contains at start", "project-x", "project", 0.8},
-		{"contains in middle", "my-project", "project", 0.85},
-		{"subsequence", "production", "prd", 0.3},
-		{"token match", "my-cool-project", "cool", 0.7},
-		{"multi-token", "react-native-app", "react app", 0.7},
-		{"camelCase split", "myProject", "project", 0.7},
-		{"close typo", "projet", "project", 0.1},
+		{"prefix match", "project-manager", "project", 0.94},
+		{"prefix near-full", "project-x", "project", 0.97},
+		{"interior word match", "my-project", "project", 0.85},
+		{"dense subsequence", "production", "prd", 0.72},
+		{"interior token", "my-cool-project", "cool", 0.85},
+		{"multi-token (space matches separator)", "react-native-app", "react app", 0.85},
+		{"camelCase boundary", "myProject", "project", 0.86},
+		// A typo that introduces a character absent from the name is no longer a
+		// subsequence, so it scores 0 (the old edit-distance fallback is gone).
+		{"typo with missing char", "projet", "project", 0.0},
 		{"no match", "something", "xyz", 0.0},
 		{"empty query", "anything", "", 0.5},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := scorer.calculateTextScore(tt.text, tt.query)
-			tolerance := 0.2
+			tolerance := 0.05
 			if math.Abs(got-tt.want) > tolerance {
-				t.Errorf("calculateTextScore(%q, %q) = %.2f, want ~%.2f", 
+				t.Errorf("calculateTextScore(%q, %q) = %.3f, want ~%.2f",
 					tt.text, tt.query, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestTextScoreOrdering pins the relative ordering that motivated the fzf-style
+// rewrite. These assertions are independent of the exact scoring constants, so
+// they keep protecting intent even if the weights are later retuned.
+func TestTextScoreOrdering(t *testing.T) {
+	scorer := NewScorer()
+
+	type pair struct {
+		query    string
+		stronger string // should score strictly higher
+		weaker   string
+		why      string
+	}
+	pairs := []pair{
+		{"app", "approve-this-very-long-name", "xapp",
+			"prefix match must beat an interior match"},
+		{"rs", "redis-streams", "rust",
+			"hitting both word initials must beat a scattered subsequence"},
+		{"rna", "react-native-app", "arena",
+			"three word initials must beat a scattered subsequence"},
+		{"project", "project-manager", "my-project",
+			"prefix must beat the same word appearing mid-name"},
+		{"cool", "cool-app", "my-cool-thing",
+			"a boundary-anchored match must beat the same word deeper in the name"},
+	}
+
+	for _, p := range pairs {
+		t.Run(p.query+":"+p.stronger+">"+p.weaker, func(t *testing.T) {
+			strong := scorer.calculateTextScore(p.stronger, p.query)
+			weak := scorer.calculateTextScore(p.weaker, p.query)
+			if !(strong > weak) {
+				t.Errorf("query %q: expected %q (%.3f) > %q (%.3f) — %s",
+					p.query, p.stronger, strong, p.weaker, weak, p.why)
 			}
 		})
 	}

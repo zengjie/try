@@ -27,11 +27,9 @@ func CloneRepository(url string) error {
 		return fmt.Errorf("failed to clone repository: %w", err)
 	}
 	
-	// Write to .try_cd file for shell integration
-	home, _ := os.UserHomeDir()
-	cdFile := filepath.Join(home, ".try_cd")
-	os.WriteFile(cdFile, []byte(fullPath), 0644)
-	
+	// Write to .try_cd for shell integration and record the access (frecency).
+	core.WriteCdPath(fullPath)
+
 	fmt.Println(fullPath)
 	return nil
 }
@@ -73,22 +71,18 @@ func CreateWorktree(repoPath string, name string) error {
 			if err != nil {
 				return err
 			}
-			// Write to .try_cd file for shell integration
-			home, _ := os.UserHomeDir()
-			cdFile := filepath.Join(home, ".try_cd")
-			os.WriteFile(cdFile, []byte(path), 0644)
-			
+			// Write to .try_cd for shell integration and record the access.
+			core.WriteCdPath(path)
+
 			fmt.Println(path)
 			return nil
 		}
 		return fmt.Errorf("failed to create worktree: %w", err)
 	}
-	
-	// Write to .try_cd file for shell integration
-	home, _ := os.UserHomeDir()
-	cdFile := filepath.Join(home, ".try_cd")
-	os.WriteFile(cdFile, []byte(fullPath), 0644)
-	
+
+	// Write to .try_cd for shell integration and record the access (frecency).
+	core.WriteCdPath(fullPath)
+
 	fmt.Println(fullPath)
 	return nil
 }
