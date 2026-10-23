@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 	"github.com/zengjie/try/core"
 )
 
@@ -52,6 +53,10 @@ var (
 	errorStyle = lipgloss.NewStyle().
 			Foreground(dangerColor).
 			Bold(true)
+
+	statusMsgStyle = lipgloss.NewStyle().
+			Foreground(secondaryColor).
+			Bold(true)
 	
 	deleteWarningStyle = lipgloss.NewStyle().
 			Foreground(dangerColor).
@@ -67,10 +72,6 @@ var (
 )
 
 func (m Model) View() string {
-	if m.err != nil {
-		return errorStyle.Render(fmt.Sprintf("Error: %v", m.err))
-	}
-
 	// Show help view if requested
 	if m.showHelp {
 		return m.renderHelp()
@@ -82,6 +83,22 @@ func (m Model) View() string {
 	title := renderTitleBar(m.width)
 	output.WriteString(title)
 	output.WriteString("\n")
+
+	// Status message banner (errors and feedback)
+	if m.statusMessage != "" {
+		if m.statusIsError {
+			output.WriteString(errorStyle.Render(" "+m.statusMessage))
+		} else {
+			output.WriteString(statusMsgStyle.Render(" "+m.statusMessage))
+		}
+		output.WriteString("\n")
+	}
+
+	// Clone in-progress indicator
+	if m.cloneInProgress {
+		output.WriteString(highlightStyle.Render(" Cloning repository... please wait"))
+		output.WriteString("\n")
+	}
 
 	// Search box (always show our custom search)
 	searchBox := renderSearchBox(m.query, m.IsCreating(), m.explicitCreating, m.width)
@@ -105,8 +122,8 @@ func (m Model) View() string {
 	// Delete confirmation (if active)
 	if m.deleting && m.deleteConfirm {
 		dir := m.filteredDirs[m.selectedForDelete]
-		deleteSection := deleteWarningStyle.Render(fmt.Sprintf("⚠️  Delete '%s'?", dir.Name)) + "\n" +
-			dimStyle.Render("Type 'yes' or directory name to confirm: ") + highlightStyle.Render(m.deleteInput) + "\n" +
+		deleteSection := deleteWarningStyle.Render(fmt.Sprintf("Delete '%s'?", dir.Name)) + "\n" +
+			dimStyle.Render("Type 'yes' or directory name to confirm: ") + highlightStyle.Render(m.deleteInput+cursorChar) + "\n" +
 			helpStyle.Render("Press ESC to cancel")
 		output.WriteString(deleteSection)
 		output.WriteString("\n")
@@ -147,8 +164,16 @@ func (m Model) View() string {
 		output.WriteString("\n")
 	}
 
-	// Status bar
-	statusText := renderStatusBar(m.list.Index()+1, len(m.filteredDirs), m.query)
+	// Content preview of the highlighted directory
+	if preview := m.SelectedPreview(); preview != "" {
+		output.WriteString(renderPreviewLine(preview, m.width))
+		output.WriteString("\n")
+	}
+
+	// Status bar with pagination
+	page := m.list.Paginator.Page + 1
+	totalPages := m.list.Paginator.TotalPages
+	statusText := renderStatusBar(m.list.Index()+1, len(m.filteredDirs), m.query, page, totalPages)
 	output.WriteString(statusText)
 	output.WriteString("\n")
 
@@ -159,30 +184,33 @@ func (m Model) View() string {
 	return output.String()
 }
 
+const cursorChar = "█"
+
 func renderSearchBox(query string, isCreating bool, explicitCreating bool, width int) string {
 	if explicitCreating && query != "" {
-		// Explicit creation mode - show different style
-		content := fmt.Sprintf("✨ Creating: %s", query)
+		content := fmt.Sprintf("Creating: %s%s", query, cursorChar)
 		box := searchBoxStyle.Width(width - 2).Render(content)
 		return box
 	}
-	
-	// Normal search mode
-	content := fmt.Sprintf("🔍 %s", query)
+
 	if query == "" {
-		content = "🔍 Type to search with fuzzy matching..."
+		content := "Type to search..." + dimStyle.Render(cursorChar)
+		box := searchBoxStyle.Width(width - 2).Render(content)
+		return box
 	}
+
+	content := query + cursorChar
 	if isCreating {
 		content += dimStyle.Render(" (new)")
 	}
-	
+
 	box := searchBoxStyle.Width(width - 2).Render(content)
 	return box
 }
 
 func renderInputPrompt(title, prompt, input string) string {
 	titleLine := highlightStyle.Render(title)
-	inputLine := dimStyle.Render(prompt) + " " + highlightStyle.Render(input)
+	inputLine := dimStyle.Render(prompt) + " " + highlightStyle.Render(input+cursorChar)
 	helpLine := helpStyle.Render("Press Enter to confirm, ESC to cancel")
 	return fmt.Sprintf("%s\n%s\n%s", titleLine, inputLine, helpLine)
 }
@@ -209,55 +237,71 @@ func renderCreationPreview(query string) string {
 	return fmt.Sprintf("%s\n%s\n%s\n%s", title, input, preview, help)
 }
 
-func renderStatusBar(current, total int, query string) string {
+// renderPreviewLine renders the one-line content hint for the highlighted
+// directory. Truncation is display-width aware so CJK/emoji README lines don't
+// break the layout.
+func renderPreviewLine(preview string, width int) string {
+	const prefix = " ▸ "
+	maxWidth := width - lipgloss.Width(prefix) - 1
+	if maxWidth < 1 {
+		return ""
+	}
+	preview = runewidth.Truncate(preview, maxWidth, "…")
+	return dimStyle.Render(prefix + preview)
+}
+
+func renderStatusBar(current, total int, query string, page, totalPages int) string {
 	if total == 0 {
 		return statusBarStyle.Render(" Ready to create new directory")
 	}
-	
+
 	status := fmt.Sprintf(" %d/%d", current, total)
 	if query != "" {
 		status += fmt.Sprintf(" matching '%s'", query)
+	}
+	if totalPages > 1 {
+		status += fmt.Sprintf("  (page %d/%d)", page, totalPages)
 	}
 	return statusBarStyle.Render(status)
 }
 
 func renderHelpBar() string {
 	shortcuts := []string{
-		"↑↓←→ Navigate",
+		"^N/^P Navigate",
 		"⏎ Select",
-		"^W Worktree",
+		"^O Create",
+		"^X Delete",
 		"^G Clone",
-		"^D Delete",
+		"^T Worktree",
+		"^E Finder",
 		"? Help",
 		"^C Quit",
 	}
-	return helpStyle.Render(" " + strings.Join(shortcuts, " │ "))
+	return helpStyle.Render(" " + strings.Join(shortcuts, " | "))
 }
 
 func renderTitleBar(width int) string {
-	title := " 🚀 Try - Fresh Directories for Every Vibe "
-	padding := (width - lipgloss.Width(title)) / 2
-	if padding < 0 {
-		padding = 0
+	title := "🚀 Try - Fresh Directories for Every Vibe"
+	// Terminal narrower than the title (or width not yet known): render as-is.
+	// Otherwise let titleStyle center it; its Width includes the padding.
+	if width < lipgloss.Width(titleStyle.Render(title)) {
+		return titleStyle.Render(title)
 	}
-	paddedTitle := strings.Repeat(" ", padding) + title + strings.Repeat(" ", width-padding-lipgloss.Width(title))
-	return titleStyle.Render(paddedTitle)
+	return titleStyle.Width(width).Render(title)
 }
 
 func renderTableHeader(width int) string {
-	// Fixed column widths matching the delegate
-	// Using tab separation for better alignment
-	header := fmt.Sprintf("  %-*s %-*s %-*s", 
-		NameColumnWidth, "Name", 
-		TagsColumnWidth, "Tags", 
+	nameColWidth := NameColumnWidth(width)
+	header := fmt.Sprintf("  %-*s %-*s %-*s",
+		nameColWidth, "Name",
+		TagsColumnWidth, "Tags",
 		ModifiedColumnWidth, "Modified")
-	
-	// Style the header
+
 	headerStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#7C3AED")).
 		Bold(true).
 		Underline(true)
-	
+
 	return headerStyle.Render(header)
 }
 

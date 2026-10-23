@@ -3,7 +3,9 @@ package ui
 import (
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -11,12 +13,22 @@ import (
 	"github.com/zengjie/try/core"
 )
 
-// Column width constants for consistent layout
+// Fixed column widths for tags and modified; name column flexes
 const (
-	NameColumnWidth     = 50
 	TagsColumnWidth     = 15
 	ModifiedColumnWidth = 15
+	MinNameColumnWidth  = 20
+	FixedColumnsWidth   = TagsColumnWidth + ModifiedColumnWidth + 6 // 6 for prefix + spacing
 )
+
+// NameColumnWidth calculates the name column width based on terminal width
+func NameColumnWidth(termWidth int) int {
+	w := termWidth - FixedColumnsWidth
+	if w < MinNameColumnWidth {
+		return MinNameColumnWidth
+	}
+	return w
+}
 
 // DirectoryItem implements list.Item interface
 type DirectoryItem struct {
@@ -52,6 +64,28 @@ func (i DirectoryItem) Description() string {
 	return age
 }
 
+// usageTagsContent builds the content of the "Tags" column. It leads with a
+// frecency marker — the visit count, e.g. "12x", for directories opened through
+// try before — so frequently-used directories visibly explain why they sort
+// high, then appends git/worktree markers. Returns "-" when there is nothing to
+// show. Output is ASCII so its byte length equals its display width.
+func usageTagsContent(accessCount int, isGitRepo, isWorktree bool) string {
+	parts := ""
+	if accessCount > 0 {
+		parts = fmt.Sprintf("%dx ", accessCount)
+	}
+	if isGitRepo {
+		parts += "git "
+	}
+	if isWorktree {
+		parts += "worktree "
+	}
+	if parts == "" {
+		return "-"
+	}
+	return strings.TrimSpace(parts)
+}
+
 // Custom item delegate for rendering
 type itemDelegate struct{
 	maxWidth int
@@ -67,44 +101,45 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 		return
 	}
 
+	nameColWidth := NameColumnWidth(d.maxWidth)
+
 	// Build the row components
 	prefix := "  "
 	if index == m.Index() {
 		prefix = "▶ "
 	}
-	
+
 	// Special rendering for "create new" items
 	if i.IsCreateNew {
 		// Format name with special styling
 		name := i.Name
-		if len(name) > NameColumnWidth {
-			name = name[:NameColumnWidth-3] + "..."
+		if len(name) > nameColWidth {
+			name = name[:nameColWidth-3] + "..."
 		}
-		// Pad name to exactly NameColumnWidth characters
-		for len(name) < NameColumnWidth {
+		for len(name) < nameColWidth {
 			name = name + " "
 		}
-		
+
 		// Empty tags and age for create new items
 		tags := strings.Repeat(" ", TagsColumnWidth)
 		age := strings.Repeat(" ", ModifiedColumnWidth)
-		
+
 		// Build the complete row
 		row := fmt.Sprintf("%s%s %s %s", prefix, name, tags, age)
-		
+
 		// Apply style with special color for create new
 		createItemStyle := lipgloss.NewStyle().
 			PaddingLeft(0).
 			Foreground(lipgloss.Color("#A9B665")).
 			Italic(true)
-		
+
 		selectedCreateItemStyle := lipgloss.NewStyle().
 			PaddingLeft(0).
 			Foreground(lipgloss.Color("#A9B665")).
 			Background(lipgloss.Color("#45475A")).
 			Italic(true).
 			Bold(true)
-		
+
 		if index == m.Index() {
 			fmt.Fprint(w, selectedCreateItemStyle.Render(row))
 		} else {
@@ -112,32 +147,24 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 		}
 		return
 	}
-	
+
 	// Normal directory rendering
-	// Format name
 	name := i.Name
-	if len(name) > NameColumnWidth {
-		name = name[:NameColumnWidth-3] + "..."
+	if len(name) > nameColWidth {
+		name = name[:nameColWidth-3] + "..."
 	}
-	// Pad name to exactly NameColumnWidth characters
-	for len(name) < NameColumnWidth {
+	for len(name) < nameColWidth {
 		name = name + " "
 	}
 	
-	// Format tags
-	tags := ""
-	if i.IsGitRepo {
-		tags = "git "
+	// Format the tags/usage column: a leading frecency marker (visit count)
+	// followed by git/worktree markers.
+	tags := usageTagsContent(i.AccessCount, i.IsGitRepo, i.IsWorktree)
+	// Truncate then pad to the column width. Content is ASCII, so byte length
+	// equals display width here.
+	if len(tags) > TagsColumnWidth {
+		tags = tags[:TagsColumnWidth]
 	}
-	if i.IsWorktree {
-		tags = tags + "worktree "
-	}
-	if tags == "" {
-		tags = "-"
-	} else {
-		tags = strings.TrimSpace(tags)
-	}
-	// Pad tags to exactly TagsColumnWidth characters (more space for unicode)
 	for len(tags) < TagsColumnWidth {
 		tags = tags + " "
 	}
@@ -190,13 +217,16 @@ type Model struct {
 	showHelp          bool
 	cloning           bool
 	cloneInput        string
+	cloneInProgress   bool
 	creatingWorktree  bool
 	worktreeInput     string
 	worktreeRepo      string
 	initializingGit   bool
 	gitInitConfirm    bool
 	explicitCreating  bool
-	err               error
+	statusMessage     string
+	statusIsError     bool
+	previewCache      map[string]string // path -> one-line content preview
 }
 
 func NewModel() Model {
@@ -230,13 +260,16 @@ func NewModel() Model {
 		showHelp:          false,
 		cloning:           false,
 		cloneInput:        "",
+		cloneInProgress:   false,
 		creatingWorktree:  false,
 		worktreeInput:     "",
 		worktreeRepo:      "",
 		initializingGit:   false,
 		gitInitConfirm:    false,
 		explicitCreating:  false,
-		err:               nil,
+		statusMessage:     "",
+		statusIsError:     false,
+		previewCache:      map[string]string{},
 	}
 }
 
@@ -245,8 +278,11 @@ func (m *Model) LoadDirectories() error {
 	if err != nil {
 		return err
 	}
-	
+
 	m.directories = dirs
+	// Directory contents may have changed (clone, git init, delete), so cached
+	// previews are stale.
+	m.previewCache = map[string]string{}
 	m.updateFiltered()
 	return nil
 }
@@ -254,10 +290,12 @@ func (m *Model) LoadDirectories() error {
 func (m *Model) updateFiltered() {
 	// Filter and score directories using the new scoring system
 	m.filteredDirs = core.FilterAndScoreDirectories(m.directories, m.query)
-	
-	// Rank by usage for empty queries and blend text relevance when searching.
+
+	// Always sort by the blended score. With an empty query the text component
+	// is constant, so this orders by frecency (most-used/recent first); with a
+	// query it orders by relevance blended with usage.
 	core.SortDirectoriesByScore(m.filteredDirs)
-	
+
 	// Convert to list items
 	items := make([]list.Item, len(m.filteredDirs))
 	for i, dir := range m.filteredDirs {
@@ -286,18 +324,40 @@ func (m *Model) SetQuery(q string) {
 	m.updateFiltered()
 }
 
-func (m *Model) AppendToQuery(ch rune) {
-	m.query += string(ch)
+func (m *Model) AppendToQuery(text string) {
+	if text == "" {
+		return
+	}
+	m.query += text
 	m.explicitCreating = false  // Reset explicit creation when typing
 	m.updateFiltered()
 }
 
 func (m *Model) DeleteFromQuery() {
 	if len(m.query) > 0 {
-		m.query = m.query[:len(m.query)-1]
+		_, size := utf8.DecodeLastRuneInString(m.query)
+		m.query = m.query[:len(m.query)-size]
 		m.explicitCreating = false  // Reset explicit creation when deleting
 		m.updateFiltered()
 	}
+}
+
+func (m *Model) DeleteWordFromQuery() {
+	if len(m.query) == 0 {
+		return
+	}
+	// Skip trailing spaces
+	i := len(m.query) - 1
+	for i >= 0 && m.query[i] == ' ' {
+		i--
+	}
+	// Delete back to previous space or beginning
+	for i >= 0 && m.query[i] != ' ' {
+		i--
+	}
+	m.query = m.query[:i+1]
+	m.explicitCreating = false
+	m.updateFiltered()
 }
 
 func (m *Model) GetSelected() *DirectoryItem {
@@ -310,6 +370,26 @@ func (m *Model) GetSelected() *DirectoryItem {
 	return nil
 }
 
+// SelectedPreview returns a one-line content hint for the highlighted item:
+// the directory's README first line, last commit, or entry summary — or, for
+// the "create new" item, the full path that would be created. Previews are
+// computed lazily and cached per path so navigating stays fast.
+func (m *Model) SelectedPreview() string {
+	selected := m.GetSelected()
+	if selected == nil {
+		return ""
+	}
+	if selected.IsCreateNew {
+		return "will create " + filepath.Join(core.GetTryPath(), core.GenerateDatedName(selected.CreateQuery))
+	}
+	if cached, ok := m.previewCache[selected.Path]; ok {
+		return cached
+	}
+	preview := core.DirectoryPreview(selected.Path, selected.IsGitRepo || selected.IsWorktree)
+	m.previewCache[selected.Path] = preview
+	return preview
+}
+
 func (m *Model) SetSize(width, height int) {
 	m.width = width
 	m.height = height
@@ -320,9 +400,9 @@ func (m *Model) SetSize(width, height int) {
 	m.list.SetWidth(width)
 	
 	// Calculate available height for list
-	// Account for: title (1), search box (3), status (1), help (1), header (1)
-	// The header is now combined with the list view
-	availableHeight := height - 7
+	// Account for: title (1), search box (3), header (1), preview (1),
+	// status (1), help (1)
+	availableHeight := height - 8
 	if availableHeight < 5 {
 		availableHeight = 5
 	}

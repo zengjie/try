@@ -5,7 +5,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/zengjie/try/core"
@@ -17,6 +21,24 @@ type DirectorySelectedMsg struct {
 
 type DirectoryCreatedMsg struct {
 	Path string
+}
+
+type clearStatusMsg struct{}
+
+type cloneFinishedMsg struct {
+	err error
+}
+
+func clearStatusAfter(d time.Duration) tea.Cmd {
+	return tea.Tick(d, func(time.Time) tea.Msg {
+		return clearStatusMsg{}
+	})
+}
+
+func (m *Model) setStatus(message string, isError bool) tea.Cmd {
+	m.statusMessage = message
+	m.statusIsError = isError
+	return clearStatusAfter(3 * time.Second)
 }
 
 func (m Model) Init() tea.Cmd {
@@ -32,9 +54,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		// If help is showing, any key returns to main view
+		// If help is showing, dismiss on specific keys only
 		if m.showHelp {
-			m.showHelp = false
+			switch msg.String() {
+			case "esc", "enter", "?", "ctrl+c", "q":
+				m.showHelp = false
+				return m, nil
+			}
 			return m, nil
 		}
 
@@ -43,7 +69,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.String() {
 			case "enter":
 				if err := createWorktreeFromPath(m.worktreeRepo, m.worktreeInput); err != nil {
-					m.err = err
+					statusCmd := m.setStatus(fmt.Sprintf("Worktree failed: %v", err), true)
+					m.creatingWorktree = false
+					m.worktreeInput = ""
+					m.worktreeRepo = ""
+					return m, statusCmd
 				} else {
 					m.creatingWorktree = false
 					m.worktreeInput = ""
@@ -57,32 +87,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.worktreeRepo = ""
 				return m, nil
 			case "backspace":
-				if len(m.worktreeInput) > 0 {
-					m.worktreeInput = m.worktreeInput[:len(m.worktreeInput)-1]
-				}
+				m.worktreeInput = trimLastRune(m.worktreeInput)
 				return m, nil
 			default:
-				if len(msg.String()) == 1 {
-					r := []rune(msg.String())[0]
-					if r >= 32 && r < 127 {
-						m.worktreeInput += string(r)
-					}
-				}
+				m.worktreeInput += insertableText(msg)
 				return m, nil
 			}
 		}
 
-		if m.cloning {
+		if m.cloning && !m.cloneInProgress {
 			switch msg.String() {
 			case "enter":
-				if m.cloneInput != "" {
-					if err := cloneRepository(m.cloneInput); err != nil {
-						m.err = err
-					} else {
-						m.cloning = false
-						m.cloneInput = ""
-						m.LoadDirectories()
-					}
+				if url := strings.TrimSpace(m.cloneInput); url != "" {
+					m.cloneInProgress = true
+					statusCmd := m.setStatus("Cloning repository...", false)
+					return m, tea.Batch(statusCmd, runClone(url))
 				}
 				return m, nil
 			case "esc":
@@ -90,17 +109,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cloneInput = ""
 				return m, nil
 			case "backspace":
-				if len(m.cloneInput) > 0 {
-					m.cloneInput = m.cloneInput[:len(m.cloneInput)-1]
-				}
+				m.cloneInput = trimLastRune(m.cloneInput)
 				return m, nil
 			default:
-				if len(msg.String()) == 1 {
-					r := []rune(msg.String())[0]
-					if r >= 32 && r < 127 {
-						m.cloneInput += string(r)
-					}
-				}
+				m.cloneInput += insertableText(msg)
 				return m, nil
 			}
 		}
@@ -109,9 +121,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.String() {
 			case "enter":
 				dir := m.filteredDirs[m.selectedForDelete]
-				if m.deleteInput == "yes" || m.deleteInput == dir.Name {
+				shortName := core.ExtractNameFromDirectory(dir.Name)
+				if m.deleteInput == "yes" || m.deleteInput == dir.Name || m.deleteInput == shortName {
 					if err := m.ConfirmDelete(); err != nil {
-						m.err = err
+						statusCmd := m.setStatus(fmt.Sprintf("Delete failed: %v", err), true)
+						m.CancelDelete()
+						return m, statusCmd
 					}
 				}
 				m.CancelDelete()
@@ -120,17 +135,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.CancelDelete()
 				return m, nil
 			case "backspace":
-				if len(m.deleteInput) > 0 {
-					m.deleteInput = m.deleteInput[:len(m.deleteInput)-1]
-				}
+				m.deleteInput = trimLastRune(m.deleteInput)
 				return m, nil
 			default:
-				if len(msg.String()) == 1 {
-					r := []rune(msg.String())[0]
-					if r >= 32 && r < 127 {
-						m.deleteInput += string(r)
-					}
-				}
+				m.deleteInput += insertableText(msg)
 				return m, nil
 			}
 		}
@@ -140,10 +148,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "y", "Y", "enter":
 				if selected := m.GetSelected(); selected != nil && !selected.IsCreateNew {
 					if err := initializeGitRepository(selected.Path); err != nil {
-						m.err = err
-					} else {
-						m.LoadDirectories()
+						statusCmd := m.setStatus(fmt.Sprintf("Git init failed: %v", err), true)
+						m.CancelGitInit()
+						return m, statusCmd
 					}
+					m.LoadDirectories()
 				}
 				m.CancelGitInit()
 				return m, nil
@@ -156,16 +165,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Normal mode key handling
 		switch msg.String() {
-		case "ctrl+c", "q":
+		case "ctrl+c":
 			return m, tea.Quit
 
 		case "?":
-			m.showHelp = true
-			return m, nil
-
-		case "/":
-			// Start search mode by appending to query
-			m.AppendToQuery('/')
+			// Show help when not searching (common TUI convention)
+			if m.query == "" {
+				m.showHelp = true
+				return m, nil
+			}
+			// Otherwise treat as search input
+			m.AppendToQuery("?")
 			return m, nil
 
 		case "enter":
@@ -175,8 +185,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// Create new directory
 					path, err := core.CreateDirectory(selected.CreateQuery)
 					if err != nil {
-						m.err = err
-						return m, nil
+						statusCmd := m.setStatus(fmt.Sprintf("Create failed: %v", err), true)
+						return m, statusCmd
 					}
 					writeCdPath(path)
 					return m, tea.Quit
@@ -195,19 +205,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
-		case "ctrl+d":
+		case "ctrl+x":
+			// Delete directory (X = delete)
 			m.StartDelete()
 			if m.deleting {
 				m.deleteConfirm = true
+			} else {
+				statusCmd := m.setStatus("No directory selected to delete", false)
+				return m, statusCmd
 			}
 			return m, nil
 
-		case "ctrl+w":
+		case "ctrl+t":
+			// Create worktree (T = Tree)
 			if selected := m.GetSelected(); selected != nil && !selected.IsCreateNew {
 				if isGitRepository(selected.Path) {
 					m.creatingWorktree = true
 					m.worktreeRepo = selected.Path
 					m.worktreeInput = filepath.Base(selected.Path) + "-worktree"
+				} else {
+					statusCmd := m.setStatus("Not a git repository", false)
+					return m, statusCmd
 				}
 			}
 			return m, nil
@@ -217,38 +235,68 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "ctrl+r":
+			if selected := m.GetSelected(); selected != nil && !selected.IsCreateNew {
+				if selected.IsGitRepo || selected.IsWorktree {
+					statusCmd := m.setStatus("Already a git repository", false)
+					return m, statusCmd
+				}
+			}
 			m.StartGitInit()
 			return m, nil
 
 		case "ctrl+u":
+			// Clear entire search (macOS standard: kill to beginning of line)
 			m.SetQuery("")
 			return m, nil
 
-		case "ctrl+j":
-			// Move down (hidden navigation feature)
+		case "ctrl+w":
+			// Delete word backward (macOS terminal standard)
+			m.DeleteWordFromQuery()
+			return m, nil
+
+		case "ctrl+n", "ctrl+j":
+			// Move down (Emacs/macOS standard navigation)
 			m.list.CursorDown()
 			return m, nil
 
-		case "ctrl+k":
-			// Move up (hidden navigation feature)
+		case "ctrl+p", "ctrl+k":
+			// Move up (Emacs/macOS standard navigation)
 			m.list.CursorUp()
 			return m, nil
 
-		case "ctrl+p":
-			// Page up (hidden navigation feature)
-			m.list.Paginator.PrevPage()
-			return m, nil
-
-		case "ctrl+n":
-			m.StartExplicitCreate()
-			return m, nil
-
 		case "ctrl+f":
-			// Page down (hidden navigation feature)
+			// Page down (Emacs/less standard)
 			m.list.Paginator.NextPage()
 			return m, nil
 
-		case "backspace":
+		case "ctrl+b":
+			// Page up (Emacs/less standard)
+			m.list.Paginator.PrevPage()
+			return m, nil
+
+		case "ctrl+e":
+			// Open in system file manager (E = Explore)
+			if selected := m.GetSelected(); selected != nil && !selected.IsCreateNew {
+				if err := openInFileManager(selected.Path); err != nil {
+					statusCmd := m.setStatus(fmt.Sprintf("Open failed: %v", err), true)
+					return m, statusCmd
+				}
+				statusCmd := m.setStatus("Opened in file manager", false)
+				return m, statusCmd
+			}
+			return m, nil
+
+		case "ctrl+o":
+			// Create new directory explicitly (O = Open/create new)
+			if m.query == "" {
+				statusCmd := m.setStatus("Type a name first", false)
+				return m, statusCmd
+			}
+			m.StartExplicitCreate()
+			return m, nil
+
+		case "backspace", "ctrl+h":
+			// Delete character (ctrl+h = backspace in macOS terminal)
 			m.DeleteFromQuery()
 			return m, nil
 
@@ -265,12 +313,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		default:
-			// Handle character input for search
-			if len(msg.String()) == 1 {
-				r := []rune(msg.String())[0]
-				if r >= 32 && r < 127 {
-					m.AppendToQuery(r)
-				}
+			// Handle character input for search (including pasted text)
+			if text := insertableText(msg); text != "" {
+				m.AppendToQuery(text)
 			} else {
 				// Let list handle other navigation keys
 				m.list, cmd = m.list.Update(msg)
@@ -288,9 +333,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateFiltered()
 		return m, nil
 
-	case error:
-		m.err = msg
+	case clearStatusMsg:
+		m.statusMessage = ""
+		m.statusIsError = false
 		return m, nil
+
+	case cloneFinishedMsg:
+		m.cloneInProgress = false
+		if msg.err != nil {
+			statusCmd := m.setStatus(fmt.Sprintf("Clone failed: %v", msg.err), true)
+			m.cloning = false
+			m.cloneInput = ""
+			return m, statusCmd
+		}
+		statusCmd := m.setStatus("Repository cloned successfully", false)
+		m.cloning = false
+		m.cloneInput = ""
+		m.LoadDirectories()
+		return m, statusCmd
+
+	case error:
+		statusCmd := m.setStatus(fmt.Sprintf("Error: %v", msg), true)
+		return m, statusCmd
 
 	default:
 		// Pass other messages to the list
@@ -305,18 +369,9 @@ type directoriesLoadedMsg struct {
 	dirs []core.Directory
 }
 
-func loadDirectories() tea.Cmd {
-	return func() tea.Msg {
-		dirs, err := core.ScanDirectories()
-		if err != nil {
-			return err
-		}
-		return directoriesLoadedMsg{dirs: dirs}
-	}
-}
-
 func writeCdPath(path string) {
-	// Record directory selections and creations for usage-based ranking.
+	// Single choke point: writes ~/.try_cd for the shell wrapper and records the
+	// access for frecency ranking.
 	core.WriteCdPath(path)
 }
 
@@ -327,6 +382,13 @@ func isGitRepository(path string) bool {
 		return false
 	}
 	return info.IsDir()
+}
+
+func runClone(url string) tea.Cmd {
+	return func() tea.Msg {
+		err := cloneRepository(url)
+		return cloneFinishedMsg{err: err}
+	}
 }
 
 func cloneRepository(url string) error {
@@ -379,6 +441,21 @@ func createWorktreeFromPath(repoPath, name string) error {
 	return nil
 }
 
+func openInFileManager(path string) error {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", path)
+	case "linux":
+		cmd = exec.Command("xdg-open", path)
+	case "windows":
+		cmd = exec.Command("explorer", path)
+	default:
+		return fmt.Errorf("unsupported platform: %s", runtime.GOOS)
+	}
+	return cmd.Start()
+}
+
 func initializeGitRepository(path string) error {
 	// Initialize Git repository in the specified directory
 	cmd := exec.Command("git", "init")
@@ -390,4 +467,41 @@ func initializeGitRepository(path string) error {
 	}
 	
 	return nil
+}
+// insertableText extracts the printable text carried by a key message. A key
+// message may hold more than one rune: bracketed paste delivers the whole
+// clipboard in a single tea.KeyRunes event, which is why pasting a git URL used
+// to be swallowed by the single-character checks. Control characters (including
+// the newlines of a multi-line paste) are dropped, and modifier-prefixed keys
+// such as alt+x are not text at all.
+func insertableText(msg tea.KeyMsg) string {
+	if msg.Alt {
+		return ""
+	}
+	if msg.Type != tea.KeyRunes && msg.Type != tea.KeySpace {
+		return ""
+	}
+	var b strings.Builder
+	for _, r := range msg.Runes {
+		if r == '\n' || r == '\r' || r == '\t' {
+			// Treat line breaks inside a paste as separators, not as content.
+			b.WriteRune(' ')
+			continue
+		}
+		if unicode.IsControl(r) {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// trimLastRune removes the final character of s, counting runes rather than
+// bytes so multi-byte input is not cut in half.
+func trimLastRune(s string) string {
+	if s == "" {
+		return ""
+	}
+	_, size := utf8.DecodeLastRuneInString(s)
+	return s[:len(s)-size]
 }
