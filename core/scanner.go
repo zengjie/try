@@ -113,6 +113,28 @@ func FilterAndScoreDirectories(directories []Directory, query string) []Director
 	return scored
 }
 
+// LastUsed returns the most recent moment the directory was touched: the last
+// time it was opened through try, or its on-disk modification time if that is
+// newer (e.g. a fresh clone or a directory never opened via try).
+func (d Directory) LastUsed() time.Time {
+	if d.LastAccess.After(d.ModifiedTime) {
+		return d.LastAccess
+	}
+	return d.ModifiedTime
+}
+
+// SortDirectoriesByRecency orders directories by LastUsed, newest first. This
+// is the ordering for an empty query: the plain "most recently visited" list.
+func SortDirectoriesByRecency(directories []Directory) {
+	sort.SliceStable(directories, func(i, j int) bool {
+		ti, tj := directories[i].LastUsed(), directories[j].LastUsed()
+		if !ti.Equal(tj) {
+			return ti.After(tj)
+		}
+		return directories[i].Name > directories[j].Name
+	})
+}
+
 func SortDirectoriesByScore(directories []Directory) {
 	sort.Slice(directories, func(i, j int) bool {
 		if directories[i].Score != directories[j].Score {

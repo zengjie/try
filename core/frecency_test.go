@@ -95,6 +95,31 @@ func TestFilterAndScoreFrecencyOrdering(t *testing.T) {
 	}
 }
 
+func TestSortDirectoriesByRecency(t *testing.T) {
+	now := time.Now()
+	dirs := []Directory{
+		// Frequently used, but last opened 5 days ago.
+		{Name: "2025-01-01-favorite", ModifiedTime: now.Add(-30 * 24 * time.Hour),
+			AccessCount: 50, LastAccess: now.Add(-5 * 24 * time.Hour)},
+		// Opened once, an hour ago.
+		{Name: "2025-01-01-just-opened", ModifiedTime: now.Add(-60 * 24 * time.Hour),
+			AccessCount: 1, LastAccess: now.Add(-1 * time.Hour)},
+		// Never opened via try, modified 2 days ago.
+		{Name: "2025-01-01-untracked", ModifiedTime: now.Add(-2 * 24 * time.Hour)},
+		// Old access, but modified on disk more recently than that.
+		{Name: "2025-01-01-old", ModifiedTime: now.Add(-10 * 24 * time.Hour),
+			AccessCount: 3, LastAccess: now.Add(-20 * 24 * time.Hour)},
+	}
+	SortDirectoriesByRecency(dirs)
+	want := []string{"2025-01-01-just-opened", "2025-01-01-untracked", "2025-01-01-favorite", "2025-01-01-old"}
+	got := names(dirs)
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("recency order = %v, want %v", got, want)
+		}
+	}
+}
+
 func TestFilterExcludesNonMatches(t *testing.T) {
 	t.Setenv("TRY_DATA_DIR", t.TempDir()) // hermetic: ignore any real user config
 	now := time.Now()

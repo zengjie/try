@@ -291,10 +291,13 @@ func (m *Model) updateFiltered() {
 	// Filter and score directories using the new scoring system
 	m.filteredDirs = core.FilterAndScoreDirectories(m.directories, m.query)
 
-	// Always sort by the blended score. With an empty query the text component
-	// is constant, so this orders by frecency (most-used/recent first); with a
-	// query it orders by relevance blended with usage.
-	core.SortDirectoriesByScore(m.filteredDirs)
+	// With no query, list directories by last access (newest first). With a
+	// query, order by text relevance blended with usage.
+	if strings.TrimSpace(m.query) == "" {
+		core.SortDirectoriesByRecency(m.filteredDirs)
+	} else {
+		core.SortDirectoriesByScore(m.filteredDirs)
+	}
 
 	// Convert to list items
 	items := make([]list.Item, len(m.filteredDirs))
